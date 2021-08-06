@@ -1,0 +1,1881 @@
+---
+title: "Predictive Attrition Model & ROI Analysis"
+output:
+  html_document:
+    df_print: paged
+---
+
+# Objective
+
+To build a predictive model for attrition that provides useful input into an ROI calculation for retention intervention(s). 
+
+# Summary & Conclusions 
+
+Using the provided data which included variables such as employee satisfaction levels, last evaluation score, number of projects, average hours worked in a month, tenure, promotions, and salary, we sought to find a model that could accurately predict which employees may leave the company. Given the variables in the data, our goal was to determine which predictors could provide the most signal that an employee intended to leave. If this information was known, we may be able to intervene and prevent the employee from leaving, thereby saving the company money. 
+
+See the section called [Business Value: Visualizing Model Performance] at the bottom of this document for visualizations of the ROI discussed here.
+_JS: well actually, bugs in the package prevented this little bit of magic. maybe next time_
+
+## Proposed Model
+The final model proposed is a Random Forest model. The model uses random combinations of predictor variables to form many decision trees based prediction for the outcome variable. The variable importance statistics for the RF model are as follows:
+
+Predictor | 0 | 1 | MeanDecreaseAccuracy | MeanDecreaseGini
+-------| -------- | ------- | -------| --------  
+satisfaction_level | 101.400344 | 337.898530 | 319.888350  | 1124.759934
+last_evaluation | 18.640044 | 111.035368 | 113.710098 |  302.200133
+number_project | 69.694218 | 239.160597  | 235.333583 | 445.560219
+average_monthly_hours | 62.586243 | 101.416338  |  111.910062  | 328.637547
+time_spend_company | 57.939171 | 82.418274 | 91.668575| 459.621633
+Work_accident | 4.319829 | 8.684521 | 9.092943 | 4.591932
+promotion_last_5years |  2.830797 |  5.160545 | 5.064632 | 1.076596
+department | 7.580276 | 48.293374 | 29.060656 | 29.775646
+salary | 7.210778 | 27.537577 | 19.853285 | 13.094145
+
+
+Examining these stats, we see that `satisfaction_level`, `last_evaluation`, `number_project` variables give the most signal (aka, have the most influence) as factors indicating an employee may leave the company. As these values increase, so too does the probability that the employee will quit.  
+
+The proposed model has an accuracy of `98.4%` for the test dataset. It is important to note that this model is valid for the test data set, but may not generalize well to future data. The proposed model should be well validated against new datasets before proceeding. That said, the Random Forest approach should be more generalizable than a standard Decision Tree model based on the underlying statistical properties of the method.
+
+Confidence was checked through cross-validation of 10 k-folds in the data set. To gain further confidence, future analysts may wish to increase the number of bootstrap datasets they test to increase confidence in the overall model as well as gain more signal on specific features (aka predictor variables) of the model. Feature engineering may be required. 
+
+## ROI of Intervention
+
+Unfortunately, Random Forests can be difficult to interpret, so there is not a direct intervention that can be proposed based on this model. However, if we focused on the leading variable - satisfaction level - and ran an intervention to improve satisfaction, we can understand how much money may be saved. 
+
+For this objective, it has been determined that the loss of an employee costs the company 100,000 dollars. We are recommending an intervention program with a cost of 5,000 dollars per employee. Based on our research and data, we expect the intervention program to work approximately 50% of the time. With these costs in mind, it is understood that the company will save 95,000 dollars per employee who does not leave as a result of the intervention.
+
+The current retention rate is 76%, meaning 76 of every 100 employees will not leave the company. With an accuracy rate of 98.4%, our model will allow us to target interventions with near perfect accuracy for employees we expect will leave the company. Assuming our intervention can save half of those people, we can increase the retention rate to 88%. 
+
+For every 100 employees, the program can save 980K dollars for the company.
+11 people x 95,000 = 1.05M saved
+13 people x 5,000 = 65K sunk program cost, not saved
+
+For the given data set with 2400 lost employees, the intervention would have saved 23.5M dollars.
+
+
+*Confusion Matrix* for `rf_final` 
+OOB estimate of  error rate: 1.19%
+
+Confusion matrix:
+     0    1 class.error
+0 5717    9 0.001571778
+1   80 1693 0.045121263
+
+
+## For Future Analysts Using this Code
+
+The following code was used to run and interpret 4 models to predict attrition using the provided dataset. The first sections include exploratory data analysis and visualizations to understand the context of the data. The data was relatively “clean” with no missing values or duplicated observations. Models were developed using `tidy` modeling principles, including workflows and recipes. The recipes include preprocessing steps to normalize and balance the data. 
+
+A table of model results and decisions are below (more details can be found in the `model_comp` table). The approach attempted several models with varying levels of complexity. The simpler models did not perform well and did not predict above/beyond chance. The more complex models perform very well on the available dataset, but are difficult to interpret for the business. 
+
+CAVEAT: The proposed model should be well validated against new datasets before proceeding. The Random Forest approach should be more generalizable than a standard Decision Tree. 
+
+Model  | Accuracy | Decision
+-------| -------- | -------
+Logistic Regression  | 0.7473040  | Low accuracy, not better than chance
+Support Vector Class  | 0.7555702 | Low accuracy, not better than chance
+Neural Net  | 0.9361251 | High accuracy, unable to interpret results
+Random Forest  | 0.9846636  | High accuracy
+
+# File Setup
+
+## Libraries & Conflicts
+
+
+```{r Libraries, echo=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+
+suppressPackageStartupMessages({
+library(readxl)
+library(readr)
+library(MASS)
+library(dplyr)
+library(tidyr)
+library(broom)
+library(ggplot2)
+library(knitr)
+library(RCurl)
+library(DT)
+library(modelr)
+library(broom)
+library(purrr)
+library(pROC)
+library(data.table)
+library(VIM)
+library(DT)
+library(gridExtra)
+library(caret)
+library(Metrics)
+library(randomForest)
+library(keras) #neural net
+library(e1071)
+library(dtree)
+library(corrplot)
+library(DMwR2)
+library(rsample)
+library(skimr)
+library(psych)
+library(conflicted)
+library(tree)
+library(tidymodels)
+library(janitor)
+library(skimr)
+library(GGally)
+library(tidyquant)
+library(doParallel) 
+library(themis)
+library(funModeling) #Data visualization
+library(DataExplorer) #Data visualization
+library(CGPfunctions) #Data visualization - cross tabs
+library(tidylog, warn.conflicts = FALSE)
+})
+
+conflict_prefer("gather", "tidyr")
+conflict_prefer("pivot_longer", "tidyr")
+conflict_prefer("pivot_wider", "tidyr")
+conflict_prefer("tune", "tune")
+conflict_prefer("select", "dplyr")
+conflict_prefer("summarise", "dplyr")
+conflict_prefer("mutate_if", "dplyr")
+conflict_prefer("select_if", "dplyr")
+conflict_prefer("mutate", "dplyr")
+conflict_prefer("group_by", "dplyr")
+conflict_prefer("filter", "dplyr")
+conflict_prefer("rename", "dplyr")
+conflict_prefer("distinct", "dplyr")
+conflict_prefer("step_upsample", "recipes")
+conflict_prefer("chisq.test", "stats")
+conflict_prefer("skewness", "PerformanceAnalytics")
+conflict_prefer("fit", "parsnip")
+conflict_prefer("rmse", "yardstick")
+conflict_prefer("recall", "yardstick")
+conflict_prefer("precision", "yardstick")
+conflict_prefer("f_meas", "yardstick")
+conflict_prefer("accuracy", "yardstick")
+conflict_prefer("kap", "yardstick")
+conflict_prefer("roc_auc", "yardstick")
+conflict_prefer("sens", "yardstick")
+conflict_prefer("spec", "yardstick")
+conflict_prefer("map", "purrr")
+conflict_prefer("vip", "vip")
+conflict_prefer("describe", "psych")
+
+for (f in getNamespaceExports("tidylog")) {
+    conflicted::conflict_prefer(f, "tidylog", quiet = TRUE)
+}
+```
+
+```{r Failed Bug Fix, include = FALSE}
+#JULIA SILGE THINKS THERE IS A BUG IN TUNE & RECIPES KEEPING SOME OF MY MODELS FROM WORKING. WORKAROUND IS TO LOAD PACKAGES FROM GITHUB, BUT THIS DIDN'T SEEM TO WORK EITHER.
+#library(devtools)
+# install_github("tidymodels/tune")
+# install_github("tidymodels/recipes")
+
+# library(tidyverse)
+# library(tidymodels)
+# library(doFuture)
+# 
+# registerDoFuture()
+# all_cores <- detectCores(logical = FALSE)
+# cl <- parallel::makeCluster(all_cores)
+# plan(cluster, workers = cl)
+```
+
+## Helper Functions
+```{r Visualization Functions, include = FALSE}
+#From Matt Dancho DS4B 201
+
+plot_ggpairs <- function(data, color = NULL, density_alpha = 0.5) {
+    
+    color_expr <- enquo(color)
+    
+    if (rlang::quo_is_null(color_expr)) {
+        
+        g <- data %>%
+            ggpairs(lower = "blank") 
+        
+    } else {
+        
+        color_name <- quo_name(color_expr)
+        
+        g <- data %>%
+            ggpairs(mapping = aes_string(color = color_name), 
+                    lower = "blank", legend = 1,
+                    diag = list(continuous = wrap("densityDiag", 
+                                                  alpha = density_alpha))) +
+            theme(legend.position = "bottom")
+    }
+    
+    return(g)
+    
+}
+
+#From Matt Dancho DS4B 201
+plot_hist_facet <- function(data, fct_reorder = FALSE, fct_rev = FALSE, 
+                            bins = 10, fill = palette_light()[[3]], color = "white", ncol = 5, scale = "free") {
+    
+    data_factored <- data %>%
+        mutate_if(is.character, as.factor) %>%
+        mutate_if(is.factor, as.numeric) %>%
+        gather(key = key, value = value, factor_key = TRUE) 
+    
+    if (fct_reorder) {
+        data_factored <- data_factored %>%
+            mutate(key = as.character(key) %>% as.factor())
+    }
+    
+    if (fct_rev) {
+        data_factored <- data_factored %>%
+            mutate(key = fct_rev(key))
+    }
+    
+    g <- data_factored %>%
+        ggplot(aes(x = value, group = key)) +
+        geom_histogram(bins = bins, fill = fill, color = color) +
+        facet_wrap(~ key, ncol = ncol, scale = scale) + 
+        theme_tq()
+    
+    return(g)
+    
+}
+```
+
+---
+## Loading Data
+
+```{r Data import}
+library(readxl)
+Data <- read_excel("C:/Users/Jaclyn/Desktop/GithubClone/psyc6841_finalproject/01_data/PSYC6841_Final_Project_Data.xlsx")
+
+str(Data)
+```
+
+# Data Preprocessing & Review
+
+## Overview
+
+```{r Skim}
+skim(Data)
+```
+
+The dataset has 9,999 rows, 10 columns, 2 factor columns, 8 numeric columns, and no missing values (n_missing) across all columns of the data frame.
+
+```{r Glimpse}
+glimpse(Data)
+```
+
+
+```{r Col Names}
+colnames(Data)
+```
+
+```{r Character Unique}
+#VIEWING CHARACTER DATA VALUES
+Data %>%
+    select_if(is.character) %>% 
+    map(unique) #from purrr -- shows us all of the values available for our character data
+```
+
+The `sales` column appears to be mislabelled. We'll rename it "Department" based on the values we see in that column. 
+
+```{r Rename Sales}
+#RENAME 'SALES' COLUMN TO `DEPARTMENT`
+Data <- rename(Data, department = sales)
+```
+
+## Data Structures
+
+```{r Glimpse2}
+#DOUBLE CHECK FACTOR
+glimpse(Data)
+```
+
+
+```{r View Numeric Uniques}
+#TABLE OF NUMBER UNIQUE VALUES FOR NUMERIC VARIABLES
+Data %>%
+    select_if(is.numeric) %>%
+    map_df(~ unique(.) %>% length()) %>% # tries to turn it into a df instead of a list
+    gather() %>%  
+  arrange(desc(value))
+```
+
+```{r Dummy Coded}
+#VIEW DUMMY CODED VARIABLES
+Data %>% 
+  distinct(Work_accident, left, promotion_last_5years)
+```
+
+```{r View Salary}
+#VIEW LEVELS OF SALARY
+Data %>% 
+  distinct(salary)
+```
+The `salary` data needs to be turned into an ordered factor. We'll order the levels from `Low` to `High`. 
+
+```{r Mutating Salary Factor}
+#CHANGE SALARY TO ORDERED FACTOR
+Data <- Data %>%
+  mutate(salary = factor(salary,
+                                 levels = c("low",
+                                            "medium",
+                                            "high")))
+```
+
+Three of our numeric variables appear to be dummy coded (0=No/1=Yes), including `Work_accident`, `left`, `promotion_last_5years`. 
+
+One of these variables, `Left`, is our outcome variable, determining if someone stayed at or left the company. 
+
+Three of our numeric variables appear to be continuous, including `average_monthly_hours`, `satisfaction_level`, and `last_evaluation`. 
+
+Two numeric variables are discrete, including only 6 (`number_project`) or 8 (`time_spend_company`) values each.
+
+
+## Missingness & Duplicates
+
+```{r Missingness Map}
+#CHECK FOR MISSING DATA
+library(Amelia)
+missmap(Data, y.at=c(1), y.labels=c(''), col=c('orange', 'purple'))
+```
+
+Wow, no missing variables! We will consider our dataset whole and do not need to impute any missing data. 
+
+We'll also check if there are any duplicate lines we need to be aware of. 
+
+```{r Duplicate Rows}
+#CHECK FOR ROWS WITH EXACT SAME VALUES
+sum(is.na(duplicated(Data)))
+```
+
+```{r Duplicate Columns}
+#IS OUR ID COLUMN KOSHER?
+which(duplicated(Data$ID))
+```
+There do not appear to be any duplicate rows or column data. 
+
+## Summary Statistics 
+
+```{r Describe}
+psych::describe(Data)
+```
+At first glance, the variables appear as expected. Points of interest: 
+* Large, positive skew in `time_spend_company`, one of our discrete variables
+* Large SD in `number_project` and `average_monthly_hours`
+* Large Range in `average_monthly_hours `
+
+```{r Percent Attrition}
+# ATTRITION PERCENTAGE IN DATASET
+Data %>%
+  tabyl(left) %>% 
+  adorn_pct_formatting(digits = 0, affix_sign = TRUE)
+```
+
+Taking a look at our outcome variable we find that Our data is unbalanced, given about 1/4 of the observations left the organization and 3/4's stayed. We'll need to account for this in our recipes. 
+
+```{r Variable Summaries}
+#SEVERAL TABLES TO LOOK AT VARIABLES IN ISOLATION
+
+# CONTINUOUS VARIABLES
+# tabyl(Data, satisfaction_level)
+# tabyl(Data, last_evaluation)
+# tabyl(Data, average_monthly_hours)
+
+#DISCRETE & CATEGORICAL VARIABLES
+tabyl(Data, number_project) %>% 
+  adorn_pct_formatting(digits = 0, affix_sign = TRUE)
+tabyl(Data, time_spend_company) %>% 
+  adorn_pct_formatting(digits = 0, affix_sign = TRUE)
+tabyl(Data, Work_accident) %>% 
+  adorn_pct_formatting(digits = 0, affix_sign = TRUE)
+tabyl(Data, promotion_last_5years) %>% 
+  adorn_pct_formatting(digits = 0, affix_sign = TRUE)
+tabyl(Data, department) %>% 
+  adorn_pct_formatting(digits = 0, affix_sign = TRUE)
+tabyl(Data, salary) %>% 
+  adorn_pct_formatting(digits = 0, affix_sign = TRUE)
+```
+
+Checking the balance of predictor variables, we see:
+
+* There is a long tail on `time_spent_company`
+* Only 15% of observations experienced  `work_accident` 
+* Only 2% of observations have been `promotion_last_5years`
+* The `department` distribution is uneven, with 28% of observations showing in the Sales department. Support and Technical departments closely follow. Other departments are only 5% or 6% of the data. 
+
+
+## Data Visualization
+
+```{r Intro Table}
+Data %>% 
+  introduce() %>% 
+  pivot_longer(everything())
+```
+
+```{r Intro Viz}
+plot_intro(Data)
+```
+
+```{r Frequency}
+#library(funModeling)
+
+#FACTOR VARIABLE FREQUENCY
+freq(Data)
+```
+
+* The highest percentage of people are found in Sales. 
+* Low and Medium salary range are most prevalent, with High salary range accounting for only 8% of observations.
+
+```{r  Skim - Numeric}
+skim(Data) %>% 
+  filter(skim_type == 'numeric')
+```
+
+
+```{r Viz - Continuous & Discrete}
+#plot_num(Data)
+
+# Let's look at this without our dummy coded data
+Data %>% 
+   select("satisfaction_level", 
+          "last_evaluation", 
+          "number_project",       
+          "average_monthly_hours", 
+          "time_spend_company") %>% 
+  plot_num()
+```
+
+*Our numeric variables are not very normally distributed. Average monthly  and last evaluation appear bimodal.The remaining variables are somewhat skewed. 
+
+
+```{r Viz - Dummy}
+# DUMMY CODED
+Data %>% 
+   select("Work_accident", 
+          "left", 
+          "promotion_last_5years") %>% 
+  plot_num()
+```
+Our category variables are unbalanced.
+
+* There are very few promotions in the past 5 years.
+* There are relatively few observations having Work Accidents.
+
+```{r Freq - All & Attrit Only}
+## Left: frequency distribution of all discrete variables
+plot_bar(Data)
+
+## Right: `left` distribution of all discrete variables
+plot_bar(Data, with = "left")
+```
+
+* There are no big differences in distribution when accounting for `left`. Some of the departments with less representation have more attrition, such as HR and RandD.
+
+
+```{r Bar - Left}
+plot_bar(Data, by = "left")
+```
+
+```{r Bar - Salary}
+plot_bar(Data, by = "salary")
+```
+
+```{r Hist - Numeric}
+Data %>% 
+  select("satisfaction_level", 
+         "last_evaluation", 
+         "number_project",       
+         "average_monthly_hours", 
+         "time_spend_company") %>% 
+  plot_histogram()
+  
+```
+
+
+```{r Density - Numeric}
+Data %>% 
+  select("average_monthly_hours", 
+         "last_evaluation", 
+         "satisfaction_level") %>% 
+  plot_density()
+```
+
+```{r QQ Plots}
+#QQ PLOTS
+Data %>% 
+  select("average_monthly_hours", 
+         "last_evaluation", 
+         "satisfaction_level") %>% 
+    plot_qq()
+```
+* We see the general shape of residuals that we seek (s-curve).
+
+## Check for Variance
+
+```{r Create Object - Left}
+left <- Data$left #Create variable
+```
+
+
+```{r Scatterplots}
+Data %>% 
+  plot_prcomp(maxcat = 5L)
+```
+
+
+```{r Var}
+var(left)
+```
+## Data Summary 
+
+As we see in the Data:
+
+Observations: 9,999 with Variables: 10
+
+There is no missing data or duplicate data.
+
+The Outcome variable is `left` with 7635 (76%) 'No' and 2364 (24%) 'Yes'. This variable indicates if an employee left the company. 
+
+Three of our variables are dummy coded (0=No/1=Yes), including `Work_accident`, `left`, `promotion_last_5years`. One of these variables, `Left`, is our outcome variable, determining if someone stayed at or left the company. 
+
+Three of our numeric variables appear to be continuous, including `average_monthly_hours`, `satisfaction_level`, and `last_evaluation`. 
+
+Two numeric variables are discrete, including only 6 (`number_project`) and 8 (`time_spend_company`) values each.
+
+Demographic data is limited. Variables such as `department`, `salary` level, and `time_spend_company` (tenure in years) are the closest thing to demographic information we have. 
+
+Some variables provide personal information, such as `satisfaction_level` and `Work_accident`. And a few indicate overall performance for the employee, such as `last_evaluation` and `promotion_last_5years`. 
+
+We'll need to account for unbalance in the dataset in preprocessing. We'll also need to normalize (center and scale) numeric predictors. 
+
+
+
+# Data Exploration 
+
+## Correlations
+
+```{r Correlation Matrix}
+library(corrr)
+
+Data %>% select(where(is.numeric)) %>% 
+  correlate()
+```
+
+```{r Corr Object}
+#CREATE OBJECT OF CORRELATION MATRIX  
+cor_matrix <- Data %>% 
+  select(where(is.numeric)) %>% 
+  correlate()
+```
+
+```{r Cor Matrix - Rearrange}
+#REARRANGE SHOULD GROUP ANY HIGHLY CORRELATED COLUMNS
+cor_matrix %>% 
+   rearrange()
+```
+
+```{r Correlation Matrix - Outcome focus}
+cor_matrix %>% 
+  corrr::focus(left) %>% 
+  arrange(desc(left))
+```
+
+
+```{r Correlation Matrix - w Project focus}
+cor_matrix %>% 
+  corrr::focus(left, number_project, satisfaction_level) %>% 
+  arrange(desc(left))
+```
+
+
+
+```{r Cor Matrix - Stretch}
+cor_matrix %>% 
+  stretch(na.rm = TRUE, remove.dups = TRUE)
+
+#To create a structured version of our correlation data, which we can pass to ggplot or dplyr for further data analysis, we can use the stretch() function. https://www.gmudatamining.com/lesson-07-r-tutorial.html
+```
+
+
+```{r Cor Matrix - Hist}
+# histogram of the correlation values observed for all unique pairs of variables in cor_matrix
+
+cor_matrix %>% 
+  stretch(na.rm = TRUE, remove.dups = TRUE) %>% 
+  ggplot(mapping = aes(x = r)) +
+  geom_histogram(fill = '#006EA1', color = 'white', bins = 15) +
+  labs(title = 'Correlation Values',
+       x = 'Correlation Value',
+       y = 'Count')
+```
+
+
+```{r Cor Matrix as Matrix}
+cor_matrix2 <- Data %>% 
+                   select(where(is.numeric)) %>% 
+                   cor()
+
+cor_matrix2
+```
+
+```{r Cor Matrix by Factor Loadings}
+corrplot(cor_matrix2, 
+         method = "ellipse", # ellipses instead of circles
+         type = "upper", # keep upper half only
+         order = "FPC", # order by loadings on FPC
+         tl.col = "black") # color of variable text lables
+```
+
+### Correlation Summary
+
+There are no variables that are overly correlated that need to be removed. Collinearity should not be an issue. Relationships in variables seems sensical. For example - Number of Projects, Average Monthly Hours, and Last Evaluation all correlate more strongly with one another, which makes sense in a work environment. Lower correlations are seen between satisfaction level and "left", which we would also expect. 
+
+## Cross-Tabs
+
+```{r Means by Attrition}
+#CREATE A TABLE OF MEANS FOR NUMERIC VARIABLE, GROUPED BY OUTCOME VARIABLE
+Data %>%
+  group_by(left) %>%
+  summarise(
+          count = n(),
+          mean_sat = mean(satisfaction_level),
+          mean_eval = mean(last_evaluation),
+          mean_proj = mean(number_project),
+          mean_hrs = mean(average_monthly_hours),
+          mean_yrs = mean(time_spend_company)
+            )
+```
+
+Grouping by our outcome variable, `left`, we can see that the mean for many of our predictor variables does not vary by much. The largest difference is found in `satisfaction_level`, with those who left showing a lower satisfaction level, on average.
+
+
+```{r CT - Sat & Salary}
+#SATISFACTION BY SALARY LEVEL
+Data %>%
+group_by(salary) %>%
+  summarise(
+    n = n(),
+    mean = mean(satisfaction_level),
+    sd = sd(satisfaction_level)
+  )
+```
+
+Average Satisfaction level does not vary much by salary level, although it does get slightly higher at each level.
+
+```{r CT - Salary}
+#UNDERSTANDING COMBINATIONS OF DATA 
+Data %>%
+  tabyl(left, salary) %>% 
+  adorn_totals(c('row', 'col')) %>%
+  adorn_percentages('col') %>% 
+  adorn_pct_formatting(digits = 0) %>%
+  adorn_ns() %>%
+  adorn_title('combined')
+```
+
+* Departures by salary level follows the overall dataset balance of approximately 75% stay / 25% leave at Low and Medium levels.
+
+* Exception: For those with high salary, only 8% left the company.
+ 
+
+```{r CT - Dept}
+Data %>%
+  tabyl(left, department)  %>% 
+  adorn_totals(c('row', 'col')) %>%
+  adorn_percentages('col') %>% 
+  adorn_pct_formatting(digits = 0) %>%
+  adorn_ns() %>%
+  adorn_title('combined')
+```
+
+* We see a relatively even split of departures in each department, tending toward 75% stay / 25% go, which matches our overall dataset balance. 
+
+* The only exception is Management (85% stay). (Also, our Random Variable has an 85% / 15% split)
+
+```{r CT - Num Projs}
+Data %>%
+  tabyl(left, number_project) %>% 
+  adorn_totals(c('row', 'col')) %>%
+  adorn_percentages('col') %>% 
+  adorn_pct_formatting(digits = 0) %>%
+  adorn_ns() %>%
+  adorn_title('combined')
+```
+
+* The relationship of the `number_project` variable to outcome variable varies from others. There seems to be a "sweet spot" of 3 or 4 projects having less attrition. Those with 7 projects attrited at 100%. 
+
+```{r CT - Promotion}
+Data %>%
+  tabyl(left, promotion_last_5years) %>% 
+  adorn_totals(c('row', 'col')) %>%
+  adorn_percentages('col') %>% 
+  adorn_pct_formatting(digits = 0) %>%
+  adorn_ns() %>%
+  adorn_title('combined')
+```
+
+* For those who have not been promoted in last 5 years, our expected attrition rate holds. There is a much higher retention rate (94%) for those who have been promoted. 
+
+
+```{r CT - Accident}
+Data %>%
+  tabyl(left, Work_accident) %>% 
+  adorn_totals(c('row', 'col')) %>%
+  adorn_percentages('col') %>% 
+  adorn_pct_formatting(digits = 0) %>%
+  adorn_ns() %>%
+  adorn_title('combined')
+```
+
+* For those who have not had a work accident, our expected attrition rate holds. There is a much higher retention rate (93%) for those who have been in an accident. 
+
+```{r CT - Tenure}
+Data %>%
+  tabyl(left, time_spend_company) %>% 
+  adorn_totals(c('row', 'col')) %>%
+  adorn_percentages('col') %>% 
+  adorn_pct_formatting(digits = 0) %>%
+  adorn_ns() %>%
+  adorn_title('combined')
+```
+
+* There is 100% retention for employees who have stayed with the company for 7 or more years.
+
+```{r CT - Left & Sat Level}
+
+Data %>%
+group_by(left) %>%
+  summarise(
+    n = n(),
+    mean = mean(satisfaction_level),
+    sd = sd(satisfaction_level)
+  )
+```
+* Average Satisfaction level is much lower for people who left the company.
+
+```{r CT - Left & Eval}
+
+Data %>%
+group_by(left) %>%
+  summarise(
+    n = n(),
+    mean = mean(last_evaluation),
+    sd = sd(last_evaluation)
+  )
+```
+* Average score on the last evaluation is approximately even for those who left the company.
+
+```{r CT - Left & Hours}
+
+Data %>%
+group_by(left) %>%
+  summarise(
+    n = n(),
+    mean = mean(average_monthly_hours),
+    sd = sd(average_monthly_hours)
+  )
+```
+* Average monthly hours is slightly higher for those who left the company. 
+
+## Crosstab Visualizations
+
+After examining the crosstab tables of various combinations of our data, we'll also run some visualizations to see if anything else may pop out that is surprising or interesting for our modelling purposes.
+
+```{r CT - Viz}
+
+#library(CGPfunctions) 
+#https://www.youtube.com/watch?v=BoAvAuOYv3s
+
+#VISUALIZING
+
+PlotXTabs2(Data, department, time_spend_company, results.subtitle = FALSE)
+PlotXTabs2(Data, department, number_project, results.subtitle = FALSE)
+PlotXTabs2(Data, department, time_spend_company, results.subtitle = FALSE)
+
+PlotXTabs(Data, department, salary)
+PlotXTabs(Data, number_project, salary)
+
+PlotXTabs(Data, left, department)
+PlotXTabs(Data, left, salary)
+PlotXTabs(Data, left, number_project)
+PlotXTabs(Data, left, time_spend_company)
+
+```
+
+## Crosstab Observations Summary
+
+In viewing various combinations of our variables, the relationships seem to make sense for the data set explored. For example, average satisfaction level decreases for those who left the company and increases slightly for each level of salary. Average monthly hours is slightly higher for people who left the company.
+
+On the whole, our dataset has an approximately 75/25 split of retention and attrition. In most cases, this attrition percentage split stayed constant when accounting for various facets of the data. A few exceptions to the ~25% attrition rate were noted: 
+
+* When `salary` is High =  8% attrition
+* When `department` is Management =  15% attrition 
+* When `number_projects` is...
+ - 7 projects = 100% attrition (high)
+ - 6 projects = 56% attrition (high)
+ - 5 projects = 22% attrition (expected)
+ - 4 projects = 9% attrition (low)
+ - 3 projects = 2% attrition (low)
+ - 2 projects = 65% attrition (high)
+* When `promoted_last_5yrs` is Yes = 6% attrition
+* When `Work_accident` is Yes = 7% attrition 
+* When `time_spend_company` is >7 years = 0% attrition 
+
+
+# Splitting Data for Modeling
+
+## Outcome Class Imbalance
+
+```{r Imbalance}
+# ATTRITION PERCENTAGE IN DATASET
+Data %>%
+  tabyl(left) %>% 
+  adorn_pct_formatting(digits = 0, affix_sign = TRUE)
+```
+
+Taking a look at our outcome variable we find that Our data is unbalanced, given about 1/4 of the observations left the organization and 3/4's stayed. We'll need to account for this in our recipes. 
+
+## Create Training & Test Data
+
+
+<!-- ```{r Add ID} -->
+<!-- ##THIS ID VARIABLE WAS GENERALLY PROBLEMATIC IN ALL MODELS. DECIDED NOT TO USE IT. -->
+
+<!-- #Before splitting the data, we'll create an ID variable for convenience.  -->
+
+<!-- #ADDING ID COLUMN, MAKING IT FIRST COLUMN -->
+<!-- # Data <- Data %>%  -->
+<!-- #     mutate(ID = row_number()) %>% -->
+<!-- #   select(ID, everything()) -->
+<!-- ``` -->
+
+<!-- ```{r Random Var} -->
+<!-- ##THIS RANDOM VARIABLE SOUNDS LIKE A GOOD IDEA, BUT NOT SURE EXACTLY HOW TO USE IT.  -->
+
+<!-- # And we'll add a column with a random variable for later statistical tests. -->
+<!-- # Data <- Data %>% -->
+<!-- #   mutate(RND_VAR = runif(9999, min = 0, max = 1)) %>%  -->
+<!-- #   select(ID, RND_VAR, everything()) -->
+
+<!-- #Create a random variable to help with Variable Importance Decisions. This is a tip I picked up from a colleague. By creating this random variable, it gives you a definitive line when looking at variable importance. If a variable is less important than your random variable, then you know not to use it in your model. Also, if a variable is close to your random variable, you know that it probably won't be too useful in the model. It has helped me to really determine which variables are the most important and to keep my models as parsimonious as possible. -->
+<!-- ``` -->
+
+First, We'll make our outcome variable a factor for easier working outside of recipes. 
+
+```{r Factorize Outcome}
+Data <- Data %>%
+  mutate(left = as.factor(left))
+```
+
+Then, we'll set seed and split the data. We're using a default 75/25 split, as we have a nice large amount of data and this should leave enough data in each set.
+
+```{r Split Data}
+set.seed(1013)
+
+#SPLIT DATA WITH CONSIDERATION OF OUTCOME VARIABLE `LEFT`
+data_split <- initial_split(Data, prop = 0.75, strata = "left")
+
+#CREATE TRAINING & TEST DATA SETS
+train_data <- training(data_split)
+test_data <- testing(data_split)
+
+#DOUBLE CHECK OUTCOME SPLIT IN TRAINING & TEST DATA SETS
+tabyl(train_data$left)
+tabyl(test_data$left)
+```
+
+Training data and test data sets were created with a 75 / 25 split of original observations. Due to imbalance, we specified our outcome variable (`left`) when splitting to ensure training and test sets had an approximately equal number of retention & attrition in the outome variable. Checking the resulting sets shows us we successfully held the 76%/24% ratio of `left` No/Yes observations.
+
+This imbalance in Training set will be accounted for in model pre-processing 
+
+## Cross Validation V-Folds creation
+
+Now to go ahead and create our splits to use in modeling later.
+
+```{r V Folds Data}
+set.seed(1013)
+cv_folds <- vfold_cv(train_data, strata = left, v = 10) 
+
+map_dbl(cv_folds$splits,
+        function(x) {
+          dat <- as.data.frame(x)$left
+          mean(dat == "Yes")
+        })
+
+```
+
+
+# Models 
+
+To achieve our final goal of finding a predictive model for attrition that can be used to quantify the ROI of an intervention, we'll try several models. Our goal is both the most predictive model, but also one that is interpretable. We'll start with a more complex model to see how predictive it is and then run a simpler model to compare effectiveness. 
+
+## Model & Recipe Prep
+
+First we'll prep several model specifications.
+
+```{r Models}
+
+#CREATING MODELS FOR SCREENING
+#Helpful model choice approach chart: https://scikit-learn.org/stable/tutorial/machine_learning_map/index.html
+
+#Logistic Regression
+#SIMPLEST 
+spec_logistic <- 
+  logistic_reg(penalty = tune(), mixture = tune()) %>% 
+  set_engine("glm") %>% 
+  set_mode("classification")
+
+#Random Forest - Decision Tree Method
+#MORE COMPLEX
+spec_rf <- 
+  rand_forest(mtry = 5, trees = 10000, min_n = 4) %>%  #Replace with trees = #tune()
+  set_engine("randomForest", importance = TRUE) %>%  #set_engine("ranger", importance = "impurity)
+  set_mode("classification") %>% 
+  parsnip::translate()
+
+#Neural Net
+#MORE COMPLEX
+spec_nnet <- 
+   mlp() %>% 
+   set_engine("keras", verbose = 0) %>% 
+   set_mode("classification")
+
+#Support Vector Machine (LinearSV Classification)
+#MORE COMPLEX
+spec_svm_linear2 <-
+  svm_linear(cost = 1) %>%
+  set_engine("kernlab") %>%
+  set_mode("classification")
+
+
+#SOME OTHER MODEL IDEAS
+# dt_loan <- decision_tree(cost_complexity = tune(), tree_depth = tune(), min_n = tune()) %>% 
+#   set_engine("rpart") %>% 
+#   set_mode("classification")
+# 
+# xgboost_loan <- boost_tree(mtry = tune(), trees = tune(), min_n = tune(), tree_depth = tune(), learn_rate = tune(), loss_reduction = tune(), sample_size = tune())  %>% 
+#   set_engine("xgboost") %>% 
+#   set_mode("classification")
+# 
+# #K-Nearest Neighbors - This is a type of SVM
+# knn_loan <- nearest_neighbor(neighbors = tune(), weight_func = tune(), dist_power = tune()) %>% 
+#   set_engine("kknn") %>% 
+#   set_mode("classification")
+
+# spec_rf <- 
+#   rand_forest(mtry = tune(), trees = 1000, min_n = tune()) %>%  #Replace with trees = #tune()
+#   set_engine("randomForest", importance = TRUE) %>% 
+#   set_mode("classification")
+
+# spec_svm_linear <- 
+#   svm_poly(degree = 1) %>% 
+#   set_engine("kernlab") %>% 
+#   set_mode("classification")
+```
+
+Then we'll create recipes that can handle preprocessing of our data. Given the imbalance in the outcome variable, we'll add steps to correct in our training data. We'll also center and scale (normalize) data since we saw there was a good bit of non-normalness and bifurcated categorizations in predictor variables. 
+
+```{r Recipes}
+#CREATE FOUR RECIPES
+
+#"Some models (notably neural networks, K-nearest neighbors, and support vector machines) require predictors that have been centered and scaled" - https://www.tmwr.org/workflow-sets.html
+
+#PREPROCESSING RULES FROM KUHN, p550
+#LOGISTIC REGRESSION - CS, NZV, REMOVE CORR VARS
+#NEURAL NET - CS, NZV, REMOVE CORR VARS
+#SVM - CS
+#RANDOM FOREST - N/A
+
+set.seed(1013)
+
+conflict_prefer("step_upsample", "themis")
+
+#RECIPE 1 - Centered & Scaled-BoxCox; Upsample; NZV
+recipe_1 <- recipe(left ~., data = train_data) %>% 
+  #update_role(ID, new_role = "id") %>% 
+  step_BoxCox(all_numeric_predictors())%>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_dummy(all_nominal_predictors()) %>% 
+  step_nzv(all_predictors()) %>%
+  step_upsample(left, skip = TRUE)  
+  
+#RECIPE 2 - Centered & Scaled; Upsample; NZV
+recipe_2 <- recipe(left ~., data = train_data) %>% 
+  #update_role(ID, new_role = "id") %>%
+  step_center(all_numeric_predictors()) %>% 
+  step_scale(all_numeric_predictors()) %>%
+  step_dummy(all_nominal_predictors()) %>% 
+  step_nzv(all_predictors()) %>% 
+  step_upsample(left, skip = TRUE)
+
+#RECIPE 3 - Not Centered & Scaled; Upsample
+recipe_3 <- recipe(left ~., data = train_data) %>% 
+ # update_role(ID, new_role = "id") %>%      ## Per Julia Silge
+  step_dummy(all_nominal_predictors()) %>% 
+  step_upsample(left, skip = TRUE)
+
+#RECIPE 4 - Not Centered & Scaled; Upsample; NZV
+recipe_4 <- recipe(left ~., data = train_data) %>% 
+  #update_role(ID, new_role = "id")  %>%
+  step_dummy(all_nominal_predictors()) %>% 
+  step_nzv(all_predictors()) %>% 
+  step_upsample(left, skip = TRUE)
+  
+```
+
+## 1 Support Vector Classifier
+
+We'll start by running a complicated model to set "ceiling potential" for prediction accuracy.
+
+```{r SVM Workflow}
+svm_workflow <- workflow() %>% 
+  add_recipe(recipe_2) %>% 
+  add_model(spec_svm_linear2)
+  
+svm_workflow
+```
+
+```{r SVM Res}
+#RESIDUALS WITHOUT TUNING
+conflict_prefer("alpha", "scales")
+
+svm_res <- 
+  svm_workflow %>% 
+  fit_resamples(
+    resamples = cv_folds, 
+    metrics = metric_set(
+      recall, precision, f_meas, 
+      accuracy, kap,
+      roc_auc, sens, spec),
+    control = control_resamples(
+      save_pred = TRUE)
+    ) 
+
+svm_res
+```
+
+
+```{r SVM Fit}
+#FIT THE MODEL WITH TRAINING DATA
+svm_fit <- svm_workflow %>% 
+  fit(data = train_data)
+
+svm_fit
+  
+```
+
+* Without any input, the model has an error rate of .21, which is a little better than chance (.24) but not much.
+
+
+```{r SVM Tuning - AUC Plot}
+#Using a tuning grid to find the value of `cost` that leads to the highest accuracy for the SVM model
+
+set.seed(1013)
+
+#NEW WORKFLOW WITH TUNE PARAM
+svm_tune_wf <- workflow() %>%
+  add_model(spec_svm_linear2 %>% set_args(cost = tune())) %>%
+  add_formula(left ~ .)
+
+#CROSS VALIDATE MODEL WITH VFOLDS
+sim_data_fold <- vfold_cv(train_data, strata = left)
+
+param_grid <- grid_regular(cost(), levels = 10)
+
+conflict_prefer("alpha", "scales")
+
+#PLOT TUNED RESIDUALS
+tune_res <- tune_grid(
+  svm_tune_wf, 
+  resamples = sim_data_fold, 
+  grid = param_grid
+)
+autoplot(tune_res)
+```
+
+```{r SVM Tuning - Finalize}
+#Plugging in best value for cost for final model fit
+best_cost_svm <- select_best(tune_res, metric = "roc_auc")
+
+svm_linear_final <- finalize_workflow(svm_workflow, best_cost_svm)
+
+svm_linear_fit <- svm_linear_final %>% fit(train_data)
+
+svm_linear_fit
+```
+
+
+
+```{r SVM Confusion Matrix}
+#CONFUSION MATRIX WITH TUNED COST
+
+set.seed(1013)
+
+augment(svm_linear_fit, new_data = test_data) %>%
+  conf_mat(truth = left, estimate = .pred_class)
+
+
+
+#           Truth
+# Prediction    0    1
+#          0 1349   83
+#          1  560  508
+```
+
+*TO DO - UPDATE THIS DESCRIPTION AFTER RERUNNING*
+* 53.9% (n=1349) Prediction was No Attrition, Truth was No Attrition
+* 6.3% (n=508) Prediction was Attrition, Truth was Attrition
+
+77.9% Accurate prediction
+
+* 4.7% (n=560) Prediction was Attrition, Truth was No Attrition
+* 17.4% (n=83) Prediction was No Attrition, Truth was Attrition
+
+22.1% Inaccurate prediction
+
+
+
+```{r SVM Confusion Matrix - Summary}
+augment(svm_linear_fit, new_data = test_data) %>%
+  conf_mat(truth = left, estimate = .pred_class) %>% 
+  summary()
+```
+
+
+
+## 2 Logistic Regression
+
+After running a more complicated SVM model to see how good it could be, we'll run a simple Logistic Regression to compare and contrast. 
+
+
+```{r Logit Workflow}
+#LOGISTIC REGRESSION WORKFLOW
+logit_wflow <- workflow() %>%
+   add_recipe(recipe_2) %>%
+   add_model(spec_logistic)
+
+logit_wflow
+```
+
+
+```{r Logit Res}
+#RESIDUALS WITHOUT TUNING
+log_res <- 
+  logit_wflow %>% 
+  fit_resamples(
+    resamples = cv_folds, 
+    metrics = metric_set(
+      recall, precision, f_meas, 
+      accuracy, kap,
+      roc_auc, sens, spec),
+    control = control_resamples(
+      save_pred = TRUE)
+    ) 
+
+log_res
+```
+
+
+```{r Logit Coefficients}
+# save model coefficients for a fitted model object from a workflow
+
+get_model <- function(x) {
+  pull_workflow_fit(x) %>% tidy()
+}
+
+# same as before with one exception
+log_res_2 <- 
+  logit_wflow %>% 
+  fit_resamples(
+    resamples = cv_folds, 
+    metrics = metric_set(
+      recall, precision, f_meas, 
+      accuracy, kap,
+      roc_auc, sens, spec),
+    control = control_resamples(
+      save_pred = TRUE,
+      extract = get_model) # use extract and our new function
+    ) 
+
+all_coef <- map_dfr(log_res_2$.extracts, ~ .x[[1]][[1]]) #Results flattened and collected
+
+log_res_2$.extracts[[1]][[1]] #Show results
+
+```
+
+
+* Satisfaction Level, Time at Company, Work Accident, Number of Projects, High Salary are the top predictor variables. Most of these won't be addressable by an intervention. We may need to do some feature engineering to make the model more relevant to our use case. 
+
+```{r Logit K Folds}
+set.seed(1013)
+
+#Fit with formula and model
+#CROSS VALIDATE LOGIT_WKFLOW ON CV FOLDS
+
+fit_resamples(
+  logit_wflow,
+  model = spec_logistic,          
+  resamples = cv_folds
+)
+```
+
+
+```{r Logit K Folds - Results}
+
+#PRINT RESULTS
+#sAVE AS Object
+
+set.seed(1013) 
+
+logit_tune_results <- fit_resamples(logit_wflow, 
+              spec_logistic, 
+              resamples = cv_folds) %>%
+  collect_metrics()
+```
+
+
+
+
+```{r Logit Fit - Final}
+logit_last_fit <- logit_wflow %>%
+  # fit on the training set and evaluate on the test set
+  last_fit(data_split)
+
+logit_last_fit
+```
+
+
+```{r Logit Test Data Perf}
+logit_test_performance <- logit_last_fit %>% collect_metrics()
+logit_test_performance
+```
+
+Overall the performance is not great. Similar to our training data, accuracy of .74 and AUC of .81. Accuracy is even with our baseline of 74% and ROC is higher by 6%. This may be valuable for our purposes, depending on where the accuracy is coming from. 
+
+
+
+```{r Logit Predictions}
+#Generate test predictions from the test set.
+
+logit_test_predictions <- logit_last_fit %>% collect_predictions
+logit_test_predictions
+```
+
+
+```{r Logit ROC}
+#Plot the ROC Curve
+logit_test_predictions %>%
+  roc_curve(left, .pred_0) %>% #Originally, was "pred_Yes" and curve was inverted
+  ggplot(aes(x = 1 - specificity, y = sensitivity)) +
+  geom_line(size = 1.5, color = "midnightblue") +
+  geom_abline(
+    lty = 2, alpha = 0.5,
+    color = "gray50",
+    size = 1.2
+  ) 
+```
+
+
+```{r Logit Confusion Matrix}
+# generate a confusion matrix
+conflict_prefer("spec", "yardstick")
+
+
+logit_test_predictions %>%
+  conf_mat(truth = left, estimate = .pred_class)
+
+#           Truth
+# Prediction    0    1
+#          0 1389  124
+#          1  520  467
+
+```
+
+
+
+RESULTS
+
+* 55.5% (n=1389) Prediction was No Attrition, Truth was No Attrition
+
+* 18.7% (n=467) Prediction was Attrition, Truth was Attrition
+
+74.2% Accurate prediction
+
+* 20.8% (n=520) Prediction was Attrition, Truth was No Attrition
+
+* 5.0% (n=124) Prediction was No Attrition, Truth was Attrition
+
+25.8% Inaccurate prediction
+
+This is slightly worse than our more complicated SVM model in overall prediction accuracy, but not by much. This model has a much smaller percentage of False Negatives than the SVM model, which is more useful when predicting attrition, given we will want to be sure our proposed intervention ROI is not overestimated.
+
+
+
+### More Logistic Regression Analysis
+
+```{r Logit Ggplot}
+logit_test_predictions %>% 
+  ggplot() +
+  geom_density(aes(x = .pred_1, 
+                   fill = left), 
+               alpha = 0.5)
+```
+
+```{r Logit Confusion Matrix Summary}
+logit_test_predictions %>%
+  conf_mat(truth = left, estimate = .pred_class) %>%
+  summary()
+```
+
+* Specficity = .79 (If we say someone is going to leave, we get it right with this model 79%.)
+
+
+
+```{r Logit Variable Importance}
+#LIST IMPORTANT VARIABLES
+logit_final_model <- fit(logit_wflow, Data)
+
+logit_final_model
+```
+
+
+## 3 Random Forest
+
+
+```{r RF Workflow}
+rf_workflow <- workflow() %>% 
+  add_recipe(recipe_3) %>% 
+  add_model(spec_rf)
+  
+rf_workflow
+```
+
+
+```{r RF Res}
+#FAILING - MY BEST GOOGLING SUGGESTS THIS IS A BUG WITH WINDOWS AND THE TUNE/RECIPES PACKAGE. FOLLOWING WORKAROUND ADVICE ONLINE DID NOT REMEDY
+
+# conflict_prefer("recall", "Metrics")
+# conflict_prefer("select", "dplyr")
+# conflict_prefer("filter", "dplyr")
+# conflict_prefer("precision", "Metrics")
+# 
+rf_res <-
+   rf_workflow %>%
+   tune::fit_resamples(
+     resamples = cv_folds,
+     metrics = yardstick::metric_set(accuracy, roc_auc),
+     control = control_resamples(save_pred = TRUE)
+     )
+
+ rf_res %>%  collect_metrics(summarize = TRUE)
+```
+
+
+```{r RF Fit}
+
+set.seed(1013)
+
+rf_fit <- fit(rf_workflow, data = train_data)
+
+rf_fit
+```
+
+Pulling the confusion matrix out of the output: 
+
+*OOB estimate of  error rate: 0.46%*
+
+*Confusion matrix:*
+     0    1 class.error 
+0 5713   13 0.002270346
+1   40 5686 0.006985679
+
+
+```{r RF Resamples}
+set.seed(1013)
+
+rf_fit_rs <- rf_workflow %>%
+  fit_resamples(cv_folds)
+
+rf_fit_rs %>%  collect_metrics(summarize = TRUE)
+
+#TIMED OUT "Error in paste0(str1, " ") : reached elapsed time limit"
+
+```
+
+
+```{r RF Error - RMSE}
+augment(rf_fit, new_data = test_data) %>%
+  rmse(truth = as.numeric(left), estimate = as.numeric(.pred_class))
+```
+
+```{r RF Predictions}
+rf_testing_pred <- 
+  predict(rf_fit, train_data) %>% 
+  bind_cols(predict(rf_fit, train_data, type = "prob")) %>% 
+  bind_cols(train_data %>% select(left))
+
+rf_testing_pred
+```
+
+```{rRF ROC Plot}
+
+rf.roc<-roc(train_data$left, rf_final$votes[,2])
+plot(rf.roc)
+pROC::auc(rf.roc)
+```
+
+
+
+```{r RF Accuracy}
+rf_testing_pred %>% # test set predictions
+  roc_auc(truth = left, .pred_1)
+
+rf_testing_pred %>%                   # test set predictions
+  accuracy(truth = left, .pred_class)
+```
+
+
+```{r RF Final Fit}
+last_fit_rf <- last_fit(rf_workflow, 
+                        split = data_split,
+                        metrics = metric_set(
+                          recall, precision, f_meas, 
+                          accuracy, kap,
+                          roc_auc, sens, spec)
+                        )
+#Show performance metrics
+
+last_fit_rf %>% 
+  collect_metrics()
+```
+
+```{r RF Final Model}
+#RF
+rf_final <- randomForest(left ~ ., data = train_data, mtry = 5, trees = 10000, min_n = 4, keep.forest = TRUE, importance = TRUE)
+
+rf_final
+# rf_final_fit <-
+#   rf_final %>%
+#   fit(left ~ ., data = train_data)
+```
+
+```{r RF Variable Importance}
+#library(randomForest)
+
+importance(rf_final, sort = TRUE)
+```
+Number of projects and Satisfaction level are strong predictors in this model. 
+
+```{r RF Variables Used}
+varUsed(rf_final, count = TRUE, by.tree = FALSE)
+```
+
+```{r RF Error Plot}
+
+plot(rf_final)
+
+```
+
+
+
+
+```{r RF Tree}
+getTree(rf_final, k=1, labelVar = TRUE)
+```
+
+
+
+## 4 Neural Net
+
+```{r NN Workflow}
+#LOGISTIC REGRESSION WORKFLOW
+nn_workflow <- workflow() %>%
+  add_recipe(recipe_1) %>% 
+  add_model(spec_nnet)
+
+nn_workflow
+```
+
+
+```{r NN Res}
+set.seed(1013)
+
+nnet_res <- 
+  nn_workflow %>% 
+  fit_resamples(
+    resamples = cv_folds, 
+    metrics = metric_set(
+      recall, precision, f_meas, 
+      accuracy, kap,
+      roc_auc, sens, spec),
+    control = control_resamples(save_pred = TRUE)
+    ) 
+
+nnet_res
+```
+
+
+```{r NN Variable Importance Map}
+library(NeuralNetTools)
+#https://fawda123.github.io/NeuralNetTools/articles/Overview.html
+
+nn_model <- nnet::nnet(left ~ ., data = train_data, size = 10)
+
+par(mar = numeric(4))
+plotnet(nn_model)
+
+# The plotnet function plots a neural network as a simple network or as a neural interpretation diagram (NID). The default settings are to plot as NID with positive weights between layers as black lines and negative weights as grey lines. Line thickness is in proportion to relative magnitude of each weight. The first layer includes only input variables with nodes labelled as I1 through In for n input variables. One through many hidden layers are plotted with each node in each layer labelled as H1 through Hn. The output layer is plotted last with nodes labeled as O1 through On. Bias nodes connected to the hidden and output layers are also shown.
+
+```
+
+
+```{r NN Variable Importance Plots}
+NeuralNetTools::garson(nn_model)
+NeuralNetTools::olden(nn_model)
+
+# The garson function uses Garson’s algorithm to evaluate relative variable importance. This function identifies the relative importance of explanatory variables for a single response variable by deconstructing the model weights. The importance of each variable can be determined by identifying all weighted connections between the layers in the network. That is, all weights connecting the specific input node that pass through the hidden layer to the response variable are identified. This is repeated for all other explanatory variables until a list of all weights that are specific to each input variable is obtained. The connections are tallied for each input node and scaled relative to all other inputs. A single value is obtained for each explanatory variable that describes the relationship with the response variable in the model. The results indicate relative importance as the absolute magnitude from zero to one. The function cannot be used to evaluate the direction of the response. Only neural networks with one hidden layer and one output node can be evaluated.
+
+# The olden function is an alternative and more flexible approach to evaluate variable importance. The function calculates iportance as the product of the raw input-hidden and hidden-output connection weights between each input and output neuron and sums the product across all hidden neurons. An advantage of this approach is the relative contributions of each connection weight are maintained in terms of both magnitude and sign as compared to Garson’s algorithm which only considers the absolute magnitude. For example, connection weights that change sign (e.g., positive to negative) between the input-hidden to hidden-output layers would have a cancelling effect whereas Garson’s algorithm may provide misleading results based on the absolute magnitude. An additional advantage is that Olden’s algorithm is capable of evaluating neural networks with multiple hidden layers and response variables. The importance values assigned to each variable are in units that are based directly on the summed product of the connection weights. The actual values should only be interpreted based on relative sign and magnitude between explanatory variables. Comparisons between different models should not be made.
+```
+
+
+
+```{r NN Final Fit}
+last_fit_nn <- last_fit(nn_workflow, 
+                        split = data_split,
+                        metrics = metric_set(
+                          recall, precision, f_meas, 
+                          accuracy, kap,
+                          roc_auc, sens, spec)
+                        )
+#Show performance metrics
+
+last_fit_nn %>% 
+  collect_metrics()
+```
+
+These are our final performance metrics. The model performs well both on the training and test data. We have some insight into the variables driving our model, including Average Monthly Hours and Number of projects. 
+
+
+```{r NN ROC Plot}
+last_fit_nn %>% 
+  collect_predictions() %>% 
+  roc_curve(left, .pred_0) %>% 
+  autoplot()
+```
+
+```{r NN Confusion Matrix}
+
+last_fit_nn %>% 
+  collect_predictions() %>% 
+  conf_mat(truth = left, estimate = .pred_class)
+
+```
+RESULTs:
+* 71.6% (n=1791) Prediction was No Attrition, Truth was No Attrition
+* 21.8% (n=545) Prediction was Attrition, Truth was Attrition
+--
+93.4% Accurate prediction
+
+* 4.7% (n=118) Prediction was Attrition, Truth was No Attrition
+* 1.8% (n=46) Prediction was No Attrition, Truth was Attrition
+--
+6.5% Inaccurate prediction
+
+This is a much better accuracy than either the SVM Or Logistic Regression models in all directions. However, interpretability may be too difficult to make it useful. 
+
+
+# Compare Models
+
+```{r Model Comparison Metrics}
+#https://www.kirenz.com/post/2021-02-17-r-classification-tidymodels/#last-evaluation-on-test-set
+
+log_metrics <- 
+  log_res %>% 
+  collect_metrics(summarise = TRUE) %>%
+  mutate(model = "Logistic Regression") 
+
+rf_metrics <-
+  rf_res %>%
+  collect_metrics(summarise = TRUE) %>%
+  mutate(model = "Random Forest") #Seem to be running into a Windows error / known bug in package preventing ability to get these metrics for Random Forest model
+
+svm_metrics <- 
+  svm_res %>% 
+  collect_metrics(summarise = TRUE) %>%
+  mutate(model = "Support Vector Classifier")
+
+nnet_metrics <-
+  nnet_res %>%
+  collect_metrics(summarise = TRUE) %>%
+  mutate(model = "Neural Net")
+
+# create dataframe with all models
+model_compare <- bind_rows(
+                          log_metrics,
+                           rf_metrics,
+                           svm_metrics,
+                           nnet_metrics
+                           ) 
+
+# change data structure
+model_comp <- 
+  model_compare %>% 
+  select(model, .metric, mean, std_err) %>% 
+  pivot_wider(names_from = .metric, values_from = c(mean, std_err)) 
+```
+
+
+``` {r Model Comparison - Accuracy}
+# show mean Accuracy-Score for every model
+model_comp %>% 
+  arrange(mean_accuracy) %>% 
+  mutate(model = forcats::fct_reorder(model, mean_accuracy)) %>% # order results
+  ggplot(aes(model, mean_accuracy, fill=model)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_brewer(palette = "Blues") +
+   geom_text(
+     size = 3,
+     aes(label = round(mean_f_meas, 2), y = mean_f_meas + 0.08),
+     vjust = 1
+  )
+```
+
+
+```{r Model Comparison - AUC}
+# show mean area under the curve (auc) per model
+model_comp %>% 
+  arrange(mean_roc_auc) %>% 
+  mutate(model = forcats::fct_reorder(model, mean_roc_auc)) %>%
+  ggplot(aes(model, mean_roc_auc, fill=model)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_brewer(palette = "Blues") + 
+     geom_text(
+     size = 3,
+     aes(label = round(mean_roc_auc, 2), y = mean_roc_auc + 0.08),
+     vjust = 1
+  )
+```
+
+
+
+
+################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################
+
+
+# APPENDIX - COMMENTED OUT NOTES & THOUGHTS FOR FUTURE PROJECTS
+
+# Business Value: Visualizing Model Performance
+
+Turns out there is a bug in this package so we can't make all the fancy charts. wah wah
+
+```{r Final Model Objects}
+
+#FROM: https://www.kdnuggets.com/2019/06/modelplotr-cran-business-value-predictive-models.html
+
+
+# set.seed(1013)
+# 
+# #LOGIT
+# logit_final <- logistic_reg(left ~ ., mode = "classification", engine = "glm")
+# 
+# logit_final_fit <- 
+#   logit_final %>% 
+#   fit(left ~ ., data = train_data)
+# 
+# #RF
+# rf_final <- randomForest(left ~ ., data = train_data, mtry = 5, trees = 10000, min_n = 4, keep.forest = FALSE, importance = TRUE) 
+# 
+# # rf_final_fit <- 
+# #   rf_final %>% 
+# #   fit(left ~ ., data = train_data)
+# 
+# #NN
+# nn_final <- mlp(left ~ ., mode = "classification", engine = "keras")
+# 
+# # nn_final_fit <- 
+# #   nn_final %>% 
+# #   fit(left ~ ., data = train_data)
+# 
+# #SVM
+# svm_final <- svm_linear(left ~ ., mode = "classification", engine = "kernlab", cost = 1)
+# 
+# svm_final_fit <- 
+#   svm_final %>% 
+#   fit(left ~ ., data = train_data)
+
+```
+
+
+
+```{r Final Model Results Table}
+#library(modelplotr)
+
+# transform datasets and model objects into scored data and calculate ntiles 
+# preparation steps
+# scores_and_ntiles <- prepare_scores_and_ntiles(datasets = list("train_data","test_data"),
+#                       dataset_labels = list("train data","test data"),
+#                       models = list("logit_final_fit","rf_final_fit", "nn_final", "svm_final_fit"), 
+#                       model_labels = list("Logistic Regression","Random Forest", "Neural Net",
+#                                           "Support Vector Classifier"),  
+#                       target_column="left",
+#                       ntiles=100)
+
+#Error: Did you mean to use `new_data` instead of `newdata`? -- insurmountable bug
+```
+
+
+
+```{r Final Model Viz Inputs}
+# transform data generated with prepare_scores_and_ntiles into aggregated data for chosen plotting scope 
+
+# plot_input_log <- plotting_scope(prepared_input = scores_and_ntiles,
+#                              select_model_label = "Logistic Regression",
+#                              select_dataset_label = "test data")
+# 
+# plot_input_rf <- plotting_scope(prepared_input = scores_and_ntiles,
+#                              select_model_label = "Random Forest",
+#                              select_dataset_label = "test data")
+# 
+# plot_input_nn <- plotting_scope(prepared_input = scores_and_ntiles,
+#                              select_model_label = "Neural Net",
+#                              select_dataset_label = "test data")
+# 
+# plot_input_svm <- plotting_scope(prepared_input = scores_and_ntiles,
+#                              select_model_label = "Support Vector Classifier",
+#                              select_dataset_label = "test data")
+
+```
+
+
+
+```{r Final Model Plot}
+# plot all four evaluation plots and save to file, highlight decile 2
+# plot_multiplot(data = plot_input_log, highlight_ntile=2,
+#                save_fig = TRUE, save_fig_filename = 'Predictive Attrition Model')
+# 
+# plot_multiplot(data = plot_input_rf, highlight_ntile=2,
+#                save_fig = TRUE, save_fig_filename = 'Predictive Attrition Model')
+# 
+# plot_multiplot(data = plot_input_nn, highlight_ntile=2,
+#                save_fig = TRUE, save_fig_filename = 'Predictive Attrition Model')
+# 
+# plot_multiplot(data = plot_input_svm, highlight_ntile=2,
+#                save_fig = TRUE, save_fig_filename = 'Predictive Attrition Model')
+
+```
+
+
+
+```{r Final Model Plot - ROI}
+#Profit plot - automatically highlighting the ntile where profit is maximized!
+# plot_profit(data = plot_input_log, 
+#             fixed_costs = 100000, 
+#             variable_costs_per_unit = 5000,
+#             profit_per_unit = 95000)
+# 
+# plot_profit(data = plot_input_rf, 
+#             fixed_costs = 100000, 
+#             variable_costs_per_unit = 5000,
+#             profit_per_unit = 95000)
+# 
+# plot_profit(data = plot_input_nn, 
+#             fixed_costs = 100000, 
+#             variable_costs_per_unit = 5000,
+#             profit_per_unit = 95000)
+# 
+# plot_profit(data = plot_input_svm, 
+#             fixed_costs = 100000, 
+#             variable_costs_per_unit = 5000,
+#             profit_per_unit = 95000)
+ 
+```
+
+
+### WORKFLOWSETS
+
+<!-- #DID NOT USE WORKFLOW SETS DUE TO SOME KNOWN BUGS. BUT THIS MIGHT BE HELPFUL FOR LATER: -->
+<!-- # Iterating through Model & Recipe Combinations -->
+
+<!-- #Generate List of Recipes -->
+<!-- recipe_list <-  -->
+<!-- list(Recipe1 = recipe_1, Recipe2 = recipe_2, Recipe3 = recipe_3, Recipe4 = recipe_4) -->
+
+<!-- #Generate List of Model Types -->
+<!-- model_list <-  -->
+<!-- list(Random_Forest = rf_loan, SVM = svm_loan, Naive_Bayes = nb_loan, Decision_Tree = dt_loan, Boosted_Trees = xgboost_loan, KNN = knn_loan, Logistic_Regression = logistic_loan) -->
+
+<!-- # Here comes the fun part, creating a series of workflows using workflow_sets() -->
+<!-- model_set <- workflow_set(preproc = recipe_list, models = model_list, cross = T) -->
+
+<!-- Setting cross = T instructs workflow_set to create all possible combinations of parsnip model and recipe specification. -->
+
+<!-- set.seed(2) -->
+<!-- train_resamples <- bootstraps(training(loan_split), strata = Loan_Status) -->
+<!-- doParallel::registerDoParallel(cores = 12) -->
+<!-- all_workflows <-  -->
+<!--   model_set %>% workflow_map(resamples = train_resamples,  -->
+<!--                              verbose = TRUE) -->
+
+<!-- We’ve initialised a boostraps resampling procedure, this is computationally more demanding, however results in less error overall. Passing the model_set object through to workflow_map, with the resampling procedure will initate a screen of all parsnip-recipe combinations showing an output like this. This is a demanding procedure, and hence why we’ve initiated parrallel compute to ease this along. -->
+
+<!-- Using the resampling procedure, workflow_map will fit each workflow to the training data and compute accuracy on each resample and take the mean. Furthermore, as each of the recipes specifies that the hyperparameters should be tuned, workflow_map will perform some tuning to provide an optimal result. -->
+
+<!-- Once completed, we can call the all_workflows object and collect all the metrics that were calculated in this procedure, and visualise the results. -->
+<!-- N.B there is an autoplot() function available for workflow_set objects, however we want to be able to compare recipe and model performance so have had to re-engineer features for visualisation below. -->
+
+<!-- #Visualise Performance Comparison of Workflows -->
+<!-- collect_metrics(all_workflows) %>%  -->
+<!--   separate(wflow_id, into = c("Recipe", "Model_Type"), sep = "_", remove = F, extra = "merge") %>%  -->
+<!--   filter(.metric == "accuracy") %>%  -->
+<!--   group_by(wflow_id) %>%  -->
+<!--   filter(mean == max(mean)) %>%  -->
+<!--   group_by(model) %>%  -->
+<!--   select(-.config) %>%  -->
+<!--   distinct() %>% -->
+<!--   ungroup() %>%  -->
+<!--   mutate(Workflow_Rank =  row_number(-mean), -->
+<!--          .metric = str_to_upper(.metric)) %>% -->
+<!--   ggplot(aes(x=Workflow_Rank, y = mean, shape = Recipe, color = Model_Type)) + -->
+<!--     geom_point() + -->
+<!--     geom_errorbar(aes(ymin = mean-std_err, ymax = mean+std_err)) + -->
+<!--     theme_minimal()+ -->
+<!--     scale_colour_viridis_d() + -->
+<!--     labs(title = "Performance Comparison of Workflow Sets", x = "Workflow Rank", y = "Accuracy", color = "Model Types", shape = "Recipes") -->
+
+<!-- Original Random Forest Model Results -->
+<!-- #USING RANGER ENGINE, 1000 TREES. SAME RESULT WITH 10k TREES, RANGER ENGINE -->
+<!-- #WITH 1000 TREES -->
+<!-- # Warning: tune columns were requested but there were 16 predictors in the data. 16 will be used. -->
+<!-- # Warning: tune samples were requested but there were 11452 rows in the data. 11452 will be used. -->
+
+<!-- # Call: -->
+<!-- #  randomForest(x = maybe_data_frame(x), y = y, ntree = ~1000, mtry = min_cols(~tune(),      x), nodesize = min_rows(~tune(), x), importance = ~TRUE)  -->
+<!-- #                Type of random forest: classification -->
+<!-- #                      Number of trees: 1000 -->
+<!-- # No. of variables tried at each split: 16 -->
+<!-- #  -->
+<!-- #         OOB estimate of  error rate: 21.73% -->
+<!-- # Confusion matrix: -->
+<!-- #      0    1 class.error -->
+<!-- # 0 4899  827   0.1444289 -->
+<!-- # 1 1662 4064   0.2902550 -->
+
+<!-- #WITH 10000 TREES -->
+
+<!-- # Ranger result -->
+<!-- #  -->
+<!-- # Call: -->
+<!-- #  ranger::ranger(x = maybe_data_frame(x), y = y, mtry = min_cols(~tune(),      x), num.trees = ~10000, min.node.size = min_rows(~tune(),      x), importance = ~"impurity", num.threads = 1, verbose = FALSE,      seed = sample.int(10^5, 1), probability = TRUE)  -->
+<!-- #  -->
+<!-- # Type:                             Probability estimation  -->
+<!-- # Number of trees:                  10000  -->
+<!-- # Sample size:                      11452  -->
+<!-- # Number of independent variables:  18  -->
+<!-- # Mtry:                             18  -->
+<!-- # Target node size:                 11452  -->
+<!-- # Variable importance mode:         impurity  -->
+<!-- # Splitrule:                        gini  -->
+<!-- # OOB prediction error (Brier s.):  0.2500432  -->
+  
